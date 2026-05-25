@@ -14,12 +14,14 @@ LABEL description="Telegram File Renamer Bot — Production Build"
 LABEL version="1.0.0"
 
 # ── System-level setup ───────────────────────────────────────────
-# Install build tools needed for cryptg (C-extension) and clean up
-# apt cache in the same layer to keep image size minimal.
+# Install build tools AND Rust compiler needed for cryptg (C/Rust extension)
+# Clean up apt cache in the same layer to keep image size minimal.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         libffi-dev \
         libssl-dev \
+        cargo \
+        rustc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -28,7 +30,6 @@ WORKDIR /app
 
 # ── Python dependencies ───────────────────────────────────────────
 # Copy requirements first so Docker can cache this layer separately
-# from the source code. Rebuilds only when requirements.txt changes.
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --upgrade pip \
@@ -39,16 +40,9 @@ COPY raj_dev_renamer_bot.py .
 
 # ── Persistent directories ────────────────────────────────────────
 # Create directories that need to survive across restarts.
-# On Koyeb/Render, mount a persistent volume to /app/tmp_raj_dev
-# and /app/session so the Telethon .session file is not lost on
-# container redeploys (which would force re-authentication).
 RUN mkdir -p /app/tmp_raj_dev /app/session
 
 # ── Environment variable defaults ─────────────────────────────────
-# These are NON-SECRET defaults only. Actual secrets (API_ID,
-# API_HASH, BOT_TOKEN, CHANNEL_ID) MUST be injected at runtime
-# via the cloud dashboard's environment variable settings.
-# NEVER put real tokens in the Dockerfile.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TEMP_DIR=/app/tmp_raj_dev \
@@ -61,11 +55,10 @@ RUN addgroup --system rajdev \
     && adduser --system --ingroup rajdev --no-create-home rajdev \
     && chown -R rajdev:rajdev /app
 
-USER rajdev
+# Ensure non-root user has absolute read/write access to the folders
+RUN chmod -R 777 /app/tmp_raj_dev /app/session
 
-# ── Health / metadata ─────────────────────────────────────────────
-# Telegram bots don't expose HTTP ports, so no EXPOSE directive needed.
-# Koyeb/Render will detect the process as healthy if it stays running.
+USER rajdev
 
 # ── Entrypoint ────────────────────────────────────────────────────
 CMD ["python", "-u", "raj_dev_renamer_bot.py"]
