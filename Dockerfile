@@ -62,3 +62,5 @@ USER rajdev
 
 # ── Entrypoint ────────────────────────────────────────────────────
 CMD ["python", "-u", "raj_dev_renamer_bot.py"]
+# Koyeb के हेल्थ चेक को शांत करने के लिए पोर्ट एक्सपोज़ करो
+EXPOSE 8080
