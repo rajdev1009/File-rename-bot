@@ -1,0 +1,7 @@
+# RAJ DEV — Auto Caption Cleaner Bot
+# Developer: Raj Dev (@raj_dev_01)
+# Python 3.10+
+
+telethon==1.36.0
+cryptg==0.4.0
+pyaes==1.6.1
