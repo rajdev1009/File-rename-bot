@@ -90,6 +90,18 @@ def get_progress_callback(status_msg, action_text):
     return cb
 
 # ══════════════════════════════════════════════════════════════════
+#  SMART MEDIA DETECTOR (Play Button Fix)
+# ══════════════════════════════════════════════════════════════════
+
+def _is_video(filename, mime):
+    """Check karta hai ki file video/movie hai ya nahi taaki play button aaye"""
+    if mime and 'video' in mime.lower():
+        return True
+    if filename and filename.lower().endswith(('.mp4', '.mkv', '.avi', '.webm')):
+        return True
+    return False
+
+# ══════════════════════════════════════════════════════════════════
 #  CORE PROCESSOR (Zero-Download Default)
 # ══════════════════════════════════════════════════════════════════
 
@@ -99,10 +111,17 @@ async def _process_message(message):
 
     size_str = human_size(size)
     clean_caption = build_clean_caption(filename, size_str, dev_name, dev_tg)
+    video_flag = _is_video(filename, mime)
 
     try:
-        # Zero Download Fast Upload
-        await client.send_file(CHANNEL_ID, file=message.media, caption=clean_caption, parse_mode="md")
+        # Zero Download Fast Upload - Streaming support enabled if video
+        await client.send_file(
+            CHANNEL_ID, 
+            file=message.media, 
+            caption=clean_caption, 
+            parse_mode="md",
+            supports_streaming=video_flag
+        )
         log.info(f"msg_id={message.id} | Auto-Clean Success | {filename}")
         
         # Delete Original Message
@@ -130,6 +149,7 @@ async def start(event):
         f"▶️ /help - How to use\n"
         f"▶️ /thumb - Add custom thumbnail\n"
         f"▶️ /status - Check bot queue\n"
+        f"▶️ /clean - Manual file clean\n"
         f"▶️ /raj - Developer info"
     )
 
@@ -173,7 +193,6 @@ async def cmd_clean(event):
         if not target or not target.media:
             return await event.reply("⚠️ Replied message mein koi file nahi hai.")
         
-        # Add to queue manually
         await _queue.put(target)
         await event.reply("✅ Added to manual processing queue.")
     except Exception as e:
@@ -189,13 +208,14 @@ async def set_thumb(event):
         return await event.reply("⚠️ Tumne command bheja par photo attach nahi ki! Ek photo attach karke target file ko reply karo.")
 
     target_msg = await event.get_reply_message()
-    filename, _, size, _ = extract_file_info(target_msg.media)
+    filename, mime, size, _ = extract_file_info(target_msg.media)
     
     if not filename:
         return await event.reply("⚠️ Jisko reply kiya hai usme koi file nahi hai.")
 
     size_str = human_size(size)
     clean_caption = build_clean_caption(filename, size_str, dev_name, dev_tg)
+    video_flag = _is_video(filename, mime)
     
     os.makedirs(TEMP_DIR, exist_ok=True)
     status = await event.reply("⏳ Thumbnail process initializing...")
@@ -213,7 +233,8 @@ async def set_thumb(event):
             video_path, 
             thumb=thumb_path, 
             caption=clean_caption, 
-            force_document=False,
+            force_document=False,           # Don't force as binary file
+            supports_streaming=video_flag,  # Enable video player
             progress_callback=cb_upload
         )
         
