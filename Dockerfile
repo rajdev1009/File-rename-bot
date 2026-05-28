@@ -1,4 +1,4 @@
-# RAJ DEV — Auto Caption Cleaner Bot
+# RAJ DEV — Auto Caption Cleaner Bot (Multi-Lang & Thumb)
 # Developer: Raj Dev (@raj_dev_01)
 FROM python:3.10-slim
 
@@ -15,7 +15,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-COPY raj_dev_caption_bot.py .
+# 👇 NAYI FILES YAHAN COPY HONGI 👇
+COPY bot.py .
+COPY utils.py .
 
 RUN mkdir -p /app/tmp_raj_dev /app/session
 
@@ -32,4 +34,5 @@ RUN addgroup --system rajdev \
 
 USER rajdev
 
-CMD ["python", "-u", "raj_dev_caption_bot.py"]
+# 👇 BOT START KARNE KI NAYI COMMAND 👇
+CMD ["python", "-u", "bot.py"]
