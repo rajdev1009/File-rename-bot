@@ -29,6 +29,27 @@ _queue     = asyncio.Queue(maxsize=200)
 client     = TelegramClient("session_rajdev", API_ID, API_HASH)
 
 # ══════════════════════════════════════════════════════════════════
+#  HEALTH SERVER (KOYEB FIX)
+# ══════════════════════════════════════════════════════════════════
+
+async def _health_server():
+    port = int(os.environ.get("PORT", "8000"))
+    async def _handle(r, w):
+        try:
+            await r.read(1024)
+            w.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+            await w.drain()
+        except Exception:
+            pass
+        finally:
+            try: w.close(); await w.wait_closed()
+            except Exception: pass
+    srv = await asyncio.start_server(_handle, "0.0.0.0", port)
+    log.info(f"Health server on port {port}")
+    async with srv:
+        await srv.serve_forever()
+
+# ══════════════════════════════════════════════════════════════════
 #  CORE PROCESSOR (Zero-Download Default)
 # ══════════════════════════════════════════════════════════════════
 
@@ -95,13 +116,11 @@ async def set_thumb(event):
     status = await event.reply("⏳ Thumbnail process shuru ho raha hai...\n📥 Photo aur File download ho rahi hai (Isme time lagega!)...")
 
     try:
-        # Download new thumbnail & original video
         thumb_path = await event.download_media(file=TEMP_DIR)
         video_path = await target_msg.download_media(file=TEMP_DIR)
 
         await status.edit("📤 Uploading with new thumbnail...")
         
-        # Uploading with new thumb
         await client.send_file(
             event.chat_id, 
             video_path, 
@@ -110,7 +129,6 @@ async def set_thumb(event):
             force_document=False
         )
         
-        # Cleanup
         await client.delete_messages(event.chat_id, [target_msg.id, event.id, status.id])
         os.remove(thumb_path)
         os.remove(video_path)
@@ -125,7 +143,7 @@ async def on_channel_file(event):
     if not msg.media or isinstance(msg.media, MessageMediaPhoto): return
     
     cap = msg.message or ""
-    if f"Uploaded by: **{dev_name}**" in cap: return  # Infinite loop lock
+    if f"Uploaded by: **{dev_name}**" in cap: return 
     
     await _queue.put(msg)
 
@@ -144,12 +162,15 @@ async def main():
     
     workers = [asyncio.create_task(_worker()) for _ in range(MAX_WORKERS)]
     
-    try:
-        await client.run_until_disconnected()
-    finally:
-        for _ in workers: await _queue.put(None)
-        await asyncio.gather(*workers)
+    # Ye line Koyeb aur Bot dono ko zinda rakhegi
+    await asyncio.gather(
+        _health_server(),
+        client.run_until_disconnected(),
+    )
 
 if __name__ == "__main__":
-    asyncio.run(main())
-  
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+        
