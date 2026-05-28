@@ -61,7 +61,6 @@ def detect_language(filename: str) -> str:
 
 def build_clean_caption(original_filename: str, size_str: str, dev_name: str, dev_tg: str) -> str:
     """Cleans filename and builds multi-language caption."""
-    # Remove @usernames and links
     clean_name = re.sub(r'@[a-zA-Z0-9_]+', '', original_filename)
     clean_name = re.sub(r'https?://\S+|t\.me/\S+', '', clean_name, flags=re.IGNORECASE)
     clean_name = re.sub(r'[_\-]+', ' ', clean_name).strip()
@@ -105,4 +104,4 @@ def human_size(size_bytes: int) -> str:
     elif size_bytes < 1024 ** 2: return f"{size_bytes/1024:.1f} KB"
     elif size_bytes < 1024 ** 3: return f"{size_bytes/1024**2:.1f} MB"
     else: return f"{size_bytes/1024**3:.2f} GB"
-      
+        
