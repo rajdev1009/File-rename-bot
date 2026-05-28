@@ -1,21 +1,9 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          RAJ DEV — AUTO CAPTION CLEANER BOT                                 ║
+║          RAJ DEV — AUTO CAPTION CLEANER BOT (ZERO DOWNLOAD)                 ║
 ║          Developer  : Raj Dev  |  Telegram : @raj_dev_01                    ║
 ║          Function   : Removes old captions/links, adds Raj Dev branding     ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-
-SETUP:
-  1. pip install telethon
-  2. Set environment variables: API_ID, API_HASH, BOT_TOKEN, CHANNEL_ID
-  3. Add bot as Admin in channel (Post + Delete Messages permissions)
-  4. python raj_dev_caption_bot.py
-
-HOW IT WORKS:
-  - Any file posted in the channel → bot deletes old message → reposts
-    same file with clean caption (Raj Dev branding only, no old links/text)
-  - /rename command: reply to any file → bot reposts with clean caption
-  - Works on: documents, videos, audio, zip, apk — any file type
 """
 
 import os
@@ -68,7 +56,6 @@ _DEV_TG_SHA256   = "92860b13c4576cc10d5903abdda63ec8b46d0aec050ab05dceed4299893f
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
-
 def _fatal_crash(reason: str = ""):
     print(
         f"\n╔══════════════════════════════════════════════════════╗\n"
@@ -79,7 +66,6 @@ def _fatal_crash(reason: str = ""):
         file=sys.stderr, flush=True,
     )
     os._exit(1)
-
 
 def _run_integrity_check() -> tuple:
     try:
@@ -112,7 +98,7 @@ def _print_banner(dev_name: str, dev_tg: str):
   │  Developer  : {dev_name:<37}│
   │  Telegram   : {dev_tg:<37}│
   │  Status     : {G}Authorized ✅{Y}                               │
-  │  Mode       : Auto Caption Cleaner Bot                │
+  │  Mode       : Auto Caption Cleaner Bot (Zero-DL)      │
   └──────────────────────────────────────────────────────┘{R}
 """, flush=True)
     print("Hello, I am Raj. I am now live! 🚀\n", flush=True)
@@ -133,7 +119,6 @@ BOT_TOKEN  : str  = os.environ.get("BOT_TOKEN",  "").strip()
 CHANNEL_ID : int  = _env_int("CHANNEL_ID")
 MAX_WORKERS: int  = int(os.environ.get("MAX_WORKERS", "10"))
 MAX_RETRIES: int  = int(os.environ.get("MAX_RETRIES", "5"))
-TEMP_DIR   : Path = Path(os.environ.get("TEMP_DIR", "./tmp_raj_dev"))
 
 # ── Global state ──────────────────────────────────────────────────
 _semaphore : asyncio.Semaphore | None = None
@@ -145,13 +130,23 @@ _dev_tg    : str = ""
 #  CAPTION BUILDER
 # ══════════════════════════════════════════════════════════════════
 
-def _build_clean_caption(original_filename: str) -> str:
+def _build_clean_caption(original_filename: str, size_str: str) -> str:
     """
     Returns a clean branded caption.
-    ALL old text, links, usernames from original caption are discarded.
+    ALL old text, links, usernames from original caption AND filename are discarded.
     """
+    # 1. Filename mein agar koi link ya @username hai toh hatao
+    clean_name = re.sub(r'@[a-zA-Z0-9_]+', '', original_filename)
+    clean_name = re.sub(r'https?://\S+|t\.me/\S+', '', clean_name, flags=re.IGNORECASE)
+    clean_name = re.sub(r'[_\-]+', ' ', clean_name).strip()
+    
+    if not clean_name:
+        clean_name = original_filename
+
+    # 2. Final clean caption format
     return (
-        f"🎬 **{original_filename}**\n\n"
+        f"🎬 **{clean_name}**\n\n"
+        f"📦 **Size:** {size_str}\n\n"
         f"📤 Uploaded by: **{_dev_name}**\n"
         f"📢 Channel: {_dev_tg}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
@@ -162,10 +157,6 @@ def _build_clean_caption(original_filename: str) -> str:
 # ══════════════════════════════════════════════════════════════════
 
 def _extract_file_info(media) -> tuple:
-    """
-    Returns (filename, mime_type, file_size_bytes, doc_object)
-    Works for any document type: video, audio, zip, apk, pdf, etc.
-    """
     if not (media and hasattr(media, "document") and media.document):
         return None, None, 0, None
 
@@ -185,9 +176,7 @@ def _extract_file_info(media) -> tuple:
 
     return filename, mime, size, doc
 
-
 def _human_size(size_bytes: int) -> str:
-    """Convert bytes to human-readable string."""
     if size_bytes < 1024:
         return f"{size_bytes} B"
     elif size_bytes < 1024 ** 2:
@@ -198,31 +187,19 @@ def _human_size(size_bytes: int) -> str:
         return f"{size_bytes/1024**3:.2f} GB"
 
 # ══════════════════════════════════════════════════════════════════
-#  CORE PIPELINE  —  Download → Repost with clean caption → Delete original
+#  CORE PIPELINE  — ZERO DOWNLOAD APPROACH
 # ══════════════════════════════════════════════════════════════════
 
 async def _process_message(client: TelegramClient, message, notify_chat=None, notify_msg_id=None):
-    """
-    Full pipeline:
-      1. Extract filename from document (no download yet)
-      2. Build clean Raj Dev caption  (old caption/links DISCARDED)
-      3. Download file to temp path
-      4. Re-upload with clean caption
-      5. Delete original message
-      6. Clean up temp file
-
-    notify_chat / notify_msg_id: if set, bot edits that message with status updates.
-    """
     filename, mime, size, doc = _extract_file_info(message.media)
     if not filename:
         return False
 
-    clean_caption = _build_clean_caption(filename)
-    size_str      = _human_size(size)
+    size_str = _human_size(size)
+    clean_caption = _build_clean_caption(filename, size_str)
 
-    log.info("msg_id=%-8d  Processing: %s  (%s)", message.id, filename, size_str)
+    log.info("msg_id=%-8d  Processing (Zero-DL): %s (%s)", message.id, filename, size_str)
 
-    # ── Notify: starting ─────────────────────────────────────────
     status_msg = None
     if notify_chat and notify_msg_id:
         try:
@@ -234,48 +211,18 @@ async def _process_message(client: TelegramClient, message, notify_chat=None, no
         except Exception:
             pass
 
-    # ── Temp path ─────────────────────────────────────────────────
-    TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    _, _, ext = filename.rpartition(".")
-    temp_path = TEMP_DIR / f"{uuid.uuid4().hex}.{ext}"
-
-    # ── Download ──────────────────────────────────────────────────
-    downloaded = False
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            await client.download_media(message, file=str(temp_path))
-            if temp_path.exists() and temp_path.stat().st_size > 0:
-                downloaded = True
-                log.info("msg_id=%-8d  Downloaded (%s)", message.id, size_str)
-                break
-        except FloodWaitError as e:
-            log.warning("msg_id=%-8d  FloodWait %ds", message.id, e.seconds)
-            await asyncio.sleep(e.seconds + 2)
-        except Exception as e:
-            log.error("msg_id=%-8d  Download attempt %d failed: %s", message.id, attempt, e)
-            await asyncio.sleep(2 ** attempt)
-
-    if not downloaded:
-        if status_msg:
-            await status_msg.edit(f"❌ Failed to download `{filename}`.")
-        _try_del_local(temp_path)
-        return False
-
-    # ── Re-upload with CLEAN caption ──────────────────────────────
+    # ── INSTANT UPLOAD (Passing message.media skips downloading) ──
     uploaded = False
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             await client.send_file(
                 CHANNEL_ID,
-                file=str(temp_path),
+                file=message.media,
                 caption=clean_caption,
-                force_document=True,
-                file_name=filename,          # keep original filename unchanged
-                parse_mode="md",
-                part_size_kb=512,
+                parse_mode="md"
             )
             uploaded = True
-            log.info("msg_id=%-8d  Uploaded with clean caption.", message.id)
+            log.info("msg_id=%-8d  Uploaded instantly with clean caption.", message.id)
             break
         except FloodWaitError as e:
             await asyncio.sleep(e.seconds + 2)
@@ -283,14 +230,12 @@ async def _process_message(client: TelegramClient, message, notify_chat=None, no
             log.error("msg_id=%-8d  Upload attempt %d failed: %s", message.id, attempt, e)
             await asyncio.sleep(2 ** attempt)
 
-    _try_del_local(temp_path)
-
     if not uploaded:
         if status_msg:
             await status_msg.edit(f"❌ Upload failed for `{filename}`.")
         return False
 
-    # ── Delete original message ───────────────────────────────────
+    # ── DELETE ORIGINAL MESSAGE ───────────────────────────────────
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             await client.delete_messages(CHANNEL_ID, [message.id])
@@ -302,13 +247,11 @@ async def _process_message(client: TelegramClient, message, notify_chat=None, no
             log.warning("msg_id=%-8d  Delete attempt %d: %s", message.id, attempt, e)
             await asyncio.sleep(2 ** attempt)
 
-    # ── Update status message ─────────────────────────────────────
     if status_msg:
         try:
             await status_msg.edit(
                 f"✅ **Done!**\n"
                 f"📄 `{filename}`\n"
-                f"📦 Size: {size_str}\n"
                 f"🏷️ Caption cleaned & Raj Dev branding added."
             )
         except Exception:
@@ -316,14 +259,6 @@ async def _process_message(client: TelegramClient, message, notify_chat=None, no
 
     log.info("msg_id=%-8d  [COMPLETE] %s", message.id, filename)
     return True
-
-
-def _try_del_local(path: Path):
-    try:
-        if path and path.exists():
-            path.unlink()
-    except Exception:
-        pass
 
 # ══════════════════════════════════════════════════════════════════
 #  WORKER POOL
@@ -352,26 +287,24 @@ async def _worker(client: TelegramClient, wid: int):
 
 def _register_handlers(client: TelegramClient):
 
-    # ── /start ────────────────────────────────────────────────────
     @client.on(events.NewMessage(pattern=r"^/start$"))
     async def cmd_start(event):
         sender = await event.get_sender()
         name   = getattr(sender, "first_name", "there") or "there"
         await event.reply(
             f"👋 **Hello {name}! Welcome.**\n\n"
-            f"I am **{_dev_name} Caption Bot**\n"
+            f"I am **{_dev_name} Caption Bot (Lightning Fast Edition)**\n"
             f"Telegram: {_dev_tg}\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"**What I do:**\n"
-            f"📌 Remove all old captions, links & usernames\n"
-            f"📌 Add clean **Raj Dev** branding to every file\n"
-            f"📌 Works on any file — video, audio, zip, apk, pdf\n\n"
+            f"📌 Remove old captions, links & usernames INSTANTLY\n"
+            f"📌 No downloading/uploading overhead\n"
+            f"📌 Auto-detect files in channel and fix them\n\n"
             f"Type /help to see all commands.\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
         log.info("/start from %s (id=%d)", name, sender.id)
 
-    # ── /raj ──────────────────────────────────────────────────────
     @client.on(events.NewMessage(pattern=r"^/raj$"))
     async def cmd_raj(event):
         await event.reply(
@@ -379,104 +312,78 @@ def _register_handlers(client: TelegramClient):
             f"🔹 Name    : **{_dev_name}**\n"
             f"🔹 Telegram: **{_dev_tg}**\n"
             f"🔹 Role    : Bot Developer & Owner\n"
-            f"🔹 Build   : Auto Caption Cleaner Bot\n\n"
+            f"🔹 Build   : Auto Caption Cleaner (Zero-DL Edition)\n\n"
             f"⚡ Powered by Telethon + Asyncio\n"
             f"🔒 Integrity-locked. Tamper = crash."
         )
 
-    # ── /help ─────────────────────────────────────────────────────
     @client.on(events.NewMessage(pattern=r"^/help$"))
     async def cmd_help(event):
         await event.reply(
             f"📖 **{_dev_name} Caption Bot — Help**\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"**📋 Commands:**\n\n"
-            f"▶️ /start\n"
-            f"   Bot ka welcome message\n\n"
-            f"▶️ /help\n"
-            f"   Yeh help message\n\n"
-            f"▶️ /raj\n"
-            f"   Developer info dekhna\n\n"
-            f"▶️ /clean\n"
-            f"   _(Channel mein file ko reply karke)_\n"
-            f"   Us file ka caption clean karo manually\n\n"
-            f"▶️ /status\n"
-            f"   Bot ka current status aur queue info\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"**⚙️ Auto Mode (no command needed):**\n\n"
+            f"**⚙️ Auto Mode:**\n"
             f"Bas apne channel mein koi bhi file post karo.\n"
             f"Bot automatically:\n"
-            f"  ✅ Purana caption/link/text hatayega\n"
-            f"  ✅ File ka naam wahi rakhega\n"
-            f"  ✅ Raj Dev branding add karega\n"
+            f"  ✅ Purana link/username hatayega\n"
+            f"  ✅ Sirf naam aur size rakhega\n"
             f"  ✅ Original message delete karega\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"**🔐 Permissions needed (bot must be Admin):**\n"
+            f"**🔐 Bot Permissions required:**\n"
             f"  • Post Messages ✅\n"
-            f"  • Delete Messages ✅\n\n"
-            f"**📞 Support:** {_dev_tg}"
+            f"  • Delete Messages ✅"
         )
 
-    # ── /status ───────────────────────────────────────────────────
     @client.on(events.NewMessage(pattern=r"^/status$"))
     async def cmd_status(event):
         q_size = _queue.qsize() if _queue else 0
         await event.reply(
             f"📊 **Bot Status**\n\n"
-            f"🟢 Status     : **Live & Running**\n"
+            f"🟢 Status     : **Live & Running (Zero-DL Mode)**\n"
             f"👷 Workers    : {MAX_WORKERS} async\n"
             f"📥 Queue size : {q_size} pending\n"
             f"📡 Channel    : `{CHANNEL_ID}`\n"
             f"👤 Developer  : {_dev_name} ({_dev_tg})"
         )
 
-    # ── /clean — reply to a file in channel ───────────────────────
     @client.on(events.NewMessage(pattern=r"^/clean$", chats=CHANNEL_ID))
     async def cmd_clean(event):
         if not event.message.reply_to_msg_id:
-            await event.reply(
-                "⚠️ Kisi file ko **reply** karke /clean likho.\n"
-                "Example: channel mein file pe reply karo → /clean"
-            )
             return
         try:
             target = await client.get_messages(CHANNEL_ID, ids=event.message.reply_to_msg_id)
-        except Exception as e:
-            await event.reply(f"❌ Message fetch error: {e}")
+        except Exception:
             return
         if not target or not target.media:
-            await event.reply("⚠️ Replied message mein koi file nahi hai.")
             return
-        filename, _, _, _ = _extract_file_info(target.media)
-        if not filename:
-            await event.reply("⚠️ Is message mein koi document nahi mila.")
-            return
-        # Delete the /clean command to keep channel clean
+        
         try:
             await client.delete_messages(CHANNEL_ID, [event.message.id])
         except Exception:
             pass
+            
         await _queue.put((target, None, None))
-        log.info("/clean queued msg_id=%d (%s)", target.id, filename)
 
     # ── Auto mode: new file in channel ────────────────────────────
     @client.on(events.NewMessage(chats=CHANNEL_ID))
     async def on_channel_file(event):
         msg = event.message
+        
         # Skip if no media or it's a photo
         if not msg.media or isinstance(msg.media, MessageMediaPhoto):
             return
-        # Skip if already processed by this bot (caption contains our brand)
+            
+        # Infinite loop prevention: agar bot ka branding already hai, toh skip karo
         cap = msg.message or ""
         if f"Uploaded by: **{_dev_name}**" in cap or f"Uploaded by: {_dev_name}" in cap:
             return
+            
         filename, _, _, _ = _extract_file_info(msg.media)
         if not filename:
             return
-        log.info("msg_id=%-8d  Auto-queued: %s (queue=%d)", msg.id, filename, _queue.qsize())
+            
+        log.info("msg_id=%-8d  Auto-queued: %s", msg.id, filename)
         await _queue.put((msg, None, None))
 
-    log.info("All handlers registered: /start /raj /help /clean /status + auto-mode")
+    log.info("All handlers registered successfully.")
 
 # ══════════════════════════════════════════════════════════════════
 #  HEALTH SERVER  (for Koyeb / Render health checks)
@@ -521,7 +428,6 @@ async def _startup_checks():
 async def _run_bot():
     global _semaphore, _queue
 
-    TEMP_DIR.mkdir(parents=True, exist_ok=True)
     _semaphore = asyncio.Semaphore(MAX_WORKERS)
     _queue     = asyncio.Queue(maxsize=200)
 
@@ -531,9 +437,9 @@ async def _run_bot():
         connection_retries=10,
         retry_delay=5,
         flood_sleep_threshold=60,
-        device_model="RajDevCaptionBot/1.0",
+        device_model="RajDevCaptionBot/2.0",
         system_version="Linux",
-        app_version="1.0.0",
+        app_version="2.0.0",
     )
 
     await client.start(bot_token=BOT_TOKEN)
@@ -579,3 +485,4 @@ if __name__ == "__main__":
     except Exception as e:
         log.exception("Fatal: %s", e)
         sys.exit(1)
+  
