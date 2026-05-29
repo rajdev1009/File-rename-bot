@@ -8,7 +8,7 @@ from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from telethon.tl.types import MessageMediaPhoto, DocumentAttributeVideo, DocumentAttributeFilename
 
-# utils.py se aapka strict integrity aur functions import
+# utils.py se functions import
 from utils import (
     run_integrity_check, print_banner, build_clean_caption, 
     extract_file_info, human_size
@@ -32,7 +32,7 @@ _queue     = asyncio.Queue(maxsize=200)
 client     = TelegramClient("session_rajdev", API_ID, API_HASH)
 
 # ══════════════════════════════════════════════════════════════════
-#  HEALTH SERVER (KOYEB FIX - BOT KABHI STOP NAHI HOGA)
+#  HEALTH SERVER (KOYEB FIX)
 # ══════════════════════════════════════════════════════════════════
 
 async def _health_server():
@@ -53,7 +53,7 @@ async def _health_server():
         await srv.serve_forever()
 
 # ══════════════════════════════════════════════════════════════════
-#  LIVE PROGRESS BAR LOGIC (SPEED, ETA, SIZE)
+#  LIVE PROGRESS BAR LOGIC
 # ══════════════════════════════════════════════════════════════════
 
 def get_progress_callback(status_msg, action_text):
@@ -62,7 +62,6 @@ def get_progress_callback(status_msg, action_text):
     
     async def cb(current, total):
         now = time.time()
-        # Har 3 second mein update taaki Telegram block na kare
         if now - last_update_time[0] > 3 or current == total:
             last_update_time[0] = now
             if total == 0: return
@@ -90,7 +89,7 @@ def get_progress_callback(status_msg, action_text):
     return cb
 
 # ══════════════════════════════════════════════════════════════════
-#  SMART MEDIA DETECTOR (Play Button Fix)
+#  SMART MEDIA DETECTOR & HACK FIX
 # ══════════════════════════════════════════════════════════════════
 
 def _is_video(filename, mime):
@@ -101,11 +100,10 @@ def _is_video(filename, mime):
     return False
 
 def _build_video_attributes(filename, is_video):
-    """Forcefully injects streaming and video attributes so Telegram shows Play Button"""
     attrs = [DocumentAttributeFilename(file_name=filename)]
     if is_video:
         attrs.append(DocumentAttributeVideo(
-            duration=0, 
+            duration=1, 
             w=1280, 
             h=720, 
             supports_streaming=True
@@ -136,7 +134,6 @@ async def _process_message(message):
             supports_streaming=video_flag
         )
         log.info(f"msg_id={message.id} | Auto-Clean Success | {filename}")
-        
         await client.delete_messages(CHANNEL_ID, [message.id])
     except Exception as e:
         log.error(f"Error processing {filename}: {e}")
@@ -210,7 +207,7 @@ async def cmd_clean(event):
     except Exception as e:
         await event.reply(f"❌ Error: {e}")
 
-# ── NAYA FEATURE: CUSTOM THUMBNAIL WITH LIVE PROGRESS ──
+# ── NAYA FEATURE: CUSTOM THUMBNAIL (WITH MEMORY LEAK PROTECTION) ──
 @client.on(events.NewMessage(pattern=r"^/thumb$"))
 async def set_thumb(event):
     if not event.is_reply:
@@ -228,12 +225,15 @@ async def set_thumb(event):
     size_str = human_size(size)
     clean_caption = build_clean_caption(filename, size_str, dev_name, dev_tg)
     
-    # Check if it's a video and generate attributes forcefully
     video_flag = _is_video(filename, mime)
     media_attrs = _build_video_attributes(filename, video_flag)
     
     os.makedirs(TEMP_DIR, exist_ok=True)
     status = await event.reply("⏳ Thumbnail process initializing...")
+
+    thumb_path = None
+    video_path = None
+    upload_path = None
 
     try:
         await status.edit("📥 Downloading Thumbnail Photo...")
@@ -242,28 +242,39 @@ async def set_thumb(event):
         cb_download = get_progress_callback(status, "Downloading Original File...")
         video_path = await target_msg.download_media(file=TEMP_DIR, progress_callback=cb_download)
 
+        upload_path = video_path
+        if video_flag and not video_path.lower().endswith('.mp4'):
+            upload_path = video_path + ".mp4"
+            os.rename(video_path, upload_path)
+
         cb_upload = get_progress_callback(status, "Uploading with New Thumbnail...")
         await client.send_file(
             event.chat_id, 
-            video_path, 
+            upload_path,                          
             thumb=thumb_path, 
             caption=clean_caption, 
             parse_mode="md",
-            attributes=media_attrs,               # Force Video MetaData
-            force_document=not video_flag,        # False for Videos
-            supports_streaming=video_flag,        # True for Videos
+            attributes=media_attrs,               
+            force_document=not video_flag,        
+            supports_streaming=video_flag,        
             progress_callback=cb_upload
         )
         
         await status.edit("✅ **Thumbnail successfully updated!**")
-        
         await asyncio.sleep(2) 
         await client.delete_messages(event.chat_id, [target_msg.id, event.id, status.id])
-        os.remove(thumb_path)
-        os.remove(video_path)
         
     except Exception as e:
         await status.edit(f"❌ Error: {e}")
+        
+    finally:
+        # LOGIC FIX: Hamesha saari temporary files delete hongi, chahe error aaye ya success ho.
+        for path in [thumb_path, video_path, upload_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except:
+                    pass
 
 # ── AUTO MODE: DIRECT CHANNEL TRIGGER ──
 @client.on(events.NewMessage(chats=CHANNEL_ID))
@@ -301,4 +312,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-        
+            
