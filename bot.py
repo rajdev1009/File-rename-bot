@@ -6,7 +6,7 @@ import logging
 import time
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
-from telethon.tl.types import MessageMediaPhoto
+from telethon.tl.types import MessageMediaPhoto, DocumentAttributeVideo, DocumentAttributeFilename
 
 # utils.py se aapka strict integrity aur functions import
 from utils import (
@@ -94,12 +94,23 @@ def get_progress_callback(status_msg, action_text):
 # ══════════════════════════════════════════════════════════════════
 
 def _is_video(filename, mime):
-    """Check karta hai ki file video/movie hai ya nahi taaki play button aaye"""
     if mime and 'video' in mime.lower():
         return True
     if filename and filename.lower().endswith(('.mp4', '.mkv', '.avi', '.webm')):
         return True
     return False
+
+def _build_video_attributes(filename, is_video):
+    """Forcefully injects streaming and video attributes so Telegram shows Play Button"""
+    attrs = [DocumentAttributeFilename(file_name=filename)]
+    if is_video:
+        attrs.append(DocumentAttributeVideo(
+            duration=0, 
+            w=1280, 
+            h=720, 
+            supports_streaming=True
+        ))
+    return attrs
 
 # ══════════════════════════════════════════════════════════════════
 #  CORE PROCESSOR (Zero-Download Default)
@@ -112,19 +123,20 @@ async def _process_message(message):
     size_str = human_size(size)
     clean_caption = build_clean_caption(filename, size_str, dev_name, dev_tg)
     video_flag = _is_video(filename, mime)
+    media_attrs = _build_video_attributes(filename, video_flag)
 
     try:
-        # Zero Download Fast Upload - Streaming support enabled if video
         await client.send_file(
             CHANNEL_ID, 
             file=message.media, 
             caption=clean_caption, 
             parse_mode="md",
+            attributes=media_attrs,
+            force_document=not video_flag,
             supports_streaming=video_flag
         )
         log.info(f"msg_id={message.id} | Auto-Clean Success | {filename}")
         
-        # Delete Original Message
         await client.delete_messages(CHANNEL_ID, [message.id])
     except Exception as e:
         log.error(f"Error processing {filename}: {e}")
@@ -215,7 +227,10 @@ async def set_thumb(event):
 
     size_str = human_size(size)
     clean_caption = build_clean_caption(filename, size_str, dev_name, dev_tg)
+    
+    # Check if it's a video and generate attributes forcefully
     video_flag = _is_video(filename, mime)
+    media_attrs = _build_video_attributes(filename, video_flag)
     
     os.makedirs(TEMP_DIR, exist_ok=True)
     status = await event.reply("⏳ Thumbnail process initializing...")
@@ -233,8 +248,10 @@ async def set_thumb(event):
             video_path, 
             thumb=thumb_path, 
             caption=clean_caption, 
-            force_document=False,           # Don't force as binary file
-            supports_streaming=video_flag,  # Enable video player
+            parse_mode="md",
+            attributes=media_attrs,               # Force Video MetaData
+            force_document=not video_flag,        # False for Videos
+            supports_streaming=video_flag,        # True for Videos
             progress_callback=cb_upload
         )
         
@@ -274,7 +291,6 @@ async def main():
     
     workers = [asyncio.create_task(_worker()) for _ in range(MAX_WORKERS)]
     
-    # Ye block Koyeb ka Port 8000 server aur Telegram client dono ek sath chalayega
     await asyncio.gather(
         _health_server(),
         client.run_until_disconnected(),
