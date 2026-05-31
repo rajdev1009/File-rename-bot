@@ -15,7 +15,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# 👇 NAYI FILES YAHAN COPY HONGI 👇
 COPY bot.py .
 COPY utils.py .
 
@@ -26,7 +25,7 @@ ENV PYTHONUNBUFFERED=1 \
     TEMP_DIR=/app/tmp_raj_dev \
     MAX_WORKERS=10 \
     MAX_RETRIES=5 \
-    PORT=8000
+    PORT=7860
 
 RUN addgroup --system rajdev \
     && adduser --system --ingroup rajdev --no-create-home rajdev \
@@ -34,5 +33,4 @@ RUN addgroup --system rajdev \
 
 USER rajdev
 
-# 👇 BOT START KARNE KI NAYI COMMAND 👇
 CMD ["python", "-u", "bot.py"]
