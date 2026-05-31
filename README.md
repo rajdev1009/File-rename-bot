@@ -1,3 +1,19 @@
+---
+title: Raj Dev Bot
+emoji: 🚀
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
+Yeh AstraToonix ka official Telegram automation bot hai.
+
+
+
+
+
+
 # 🌌 Raj Dev - Channel File Renamer Bot
 
 Telegram channel me ek sath aane wali bhot saari files (videos, documents, audio) ko auto-rename karne ke liye ek advanced aur fast bot. ✨
